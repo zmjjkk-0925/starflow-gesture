@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#030405">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="星流">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <title>星流 · 手势粒子场</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter,"Noto Sans SC","Microsoft YaHei",sans-serif; --ink:#f7f8f8; --muted:#8a9198; --line:rgba(255,255,255,.14); --glass:rgba(8,10,12,.58); --active:#83f4e6; --hot:#ff7cb8; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:#030405; color:var(--ink); }
+    body { touch-action:none; }
+    button { font:inherit; }
+    .app { position:relative; width:100%; height:100%; min-height:460px; overflow:hidden; isolation:isolate; background:#030405; }
+    #visualizer { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
+    #camera { display:none; }
+    .vignette { position:absolute; inset:0; z-index:1; pointer-events:none; background:radial-gradient(circle at 50% 50%,transparent 30%,rgba(0,0,0,.28) 72%,rgba(0,0,0,.66) 100%),linear-gradient(180deg,rgba(0,0,0,.42),transparent 18%,transparent 78%,rgba(0,0,0,.48)); }
+    .topbar { position:absolute; z-index:3; top:0; left:0; right:0; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) 18px max(18px,env(safe-area-inset-left)); pointer-events:none; }
+    .identity { display:flex; align-items:center; gap:10px; min-width:0; }
+    .sigil { position:relative; width:26px; height:26px; flex:0 0 auto; }
+    .sigil::before,.sigil::after { content:""; position:absolute; inset:5px; border:1px solid rgba(255,255,255,.88); border-radius:50%; }
+    .sigil::after { inset:10px; border:0; background:var(--active); box-shadow:0 0 14px var(--active),0 0 26px rgba(131,244,230,.55); }
+    .name { font-size:13px; font-weight:760; }
+    .status { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:11px; white-space:nowrap; }
+    .status-dot { width:6px; height:6px; border-radius:50%; background:#5b6167; transition:background 180ms ease,box-shadow 180ms ease; }
+    .status.live .status-dot { background:var(--active); box-shadow:0 0 10px rgba(131,244,230,.9); }
+    .status.pinch .status-dot { background:var(--hot); box-shadow:0 0 11px rgba(255,124,184,.92); }
+    .status.error .status-dot { background:#ff6a6a; }
+    .toolbar { display:flex; gap:7px; pointer-events:auto; }
+    .icon-button { width:38px; height:38px; display:grid; place-items:center; padding:0; border:1px solid var(--line); border-radius:7px; background:var(--glass); color:rgba(255,255,255,.86); backdrop-filter:blur(12px); cursor:pointer; transition:background 150ms ease,border-color 150ms ease,opacity 150ms ease,transform 150ms ease; }
+    .icon-button:hover { background:rgba(34,38,42,.72); border-color:rgba(255,255,255,.3); }
+    .icon-button:active { transform:scale(.95); }
+    .icon-button:disabled { opacity:.28; cursor:not-allowed; }
+    .icon-button svg { width:18px; height:18px; stroke-width:1.8; }
+    .launch { position:absolute; z-index:3; left:50%; bottom:max(28px,env(safe-area-inset-bottom)); transform:translateX(-50%); display:grid; justify-items:center; gap:10px; width:min(88vw,440px); transition:opacity 220ms ease,visibility 220ms ease,transform 220ms ease; }
+    .launch.hidden { opacity:0; visibility:hidden; pointer-events:none; transform:translate(-50%,8px); }
+    .launch-button { min-width:132px; height:42px; padding:0 20px; border:0; border-radius:22px; background:rgba(248,249,249,.95); color:#101214; font-weight:760; font-size:13px; box-shadow:0 8px 30px rgba(0,0,0,.34); cursor:pointer; transition:transform 150ms ease,background 150ms ease; }
+    .launch-button:hover { background:#fff; transform:translateY(-1px); }
+    .launch-button:active { transform:translateY(0) scale(.98); }
+    .launch-button:disabled { opacity:.65; cursor:wait; }
+    .message { margin:0; max-width:420px; color:var(--muted); font-size:11px; line-height:1.55; text-align:center; }
+    .message.error { color:#ffaaa9; }
+    .gesture-meter { position:absolute; z-index:2; left:max(18px,env(safe-area-inset-left)); bottom:max(20px,env(safe-area-inset-bottom)); width:96px; pointer-events:none; opacity:0; transition:opacity 200ms ease; }
+    .gesture-meter.visible { opacity:1; }
+    .meter-label { color:rgba(255,255,255,.52); font-size:9px; }
+    .meter-track { height:2px; margin-top:7px; background:rgba(255,255,255,.12); overflow:hidden; }
+    .meter-fill { width:0; height:100%; background:var(--active); box-shadow:0 0 8px var(--active); transition:width 80ms linear; }
+    @media (max-width:600px) { .topbar{align-items:flex-start}.identity{flex-wrap:wrap;gap:6px 9px}.status{width:100%;padding-left:35px;margin-top:-4px}.toolbar{flex-shrink:0}.icon-button{width:36px;height:36px}.launch{bottom:max(24px,env(safe-area-inset-bottom))} }
+  </style>
+</head>
+<body>
+  <main class="app" id="app">
+    <canvas id="visualizer" aria-label="手势粒子场"></canvas>
+    <video id="camera" autoplay playsinline muted></video>
+    <div class="vignette"></div>
+    <header class="topbar">
+      <div class="identity"><span class="sigil" aria-hidden="true"></span><span class="name">星流</span><span id="status" class="status"><span class="status-dot"></span><span id="statusText">自由漂移</span></span></div>
+      <nav class="toolbar" aria-label="摄像头工具">
+        <button id="mirrorButton" class="icon-button" type="button" title="反转手势方向" aria-label="反转手势方向"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v18M5 8l-3 4 3 4M19 8l3 4-3 4M2 12h7M15 12h7"/></svg></button>
+        <button id="switchButton" class="icon-button" type="button" title="切换摄像头" aria-label="切换摄像头" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 11a8 8 0 0 0-14.93-4M4 13a8 8 0 0 0 14.93 4M4 4v5h5M20 20v-5h-5"/></svg></button>
+        <button id="cameraButton" class="icon-button" type="button" title="关闭摄像头" aria-label="关闭摄像头" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14.5 4 16 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-3h5Z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+      </nav>
+    </header>
+    <section id="launch" class="launch"><button id="startButton" class="launch-button" type="button">开启摄像头</button><p id="message" class="message">粒子已就绪</p></section>
+    <section id="gestureMeter" class="gesture-meter" aria-live="polite"><span class="meter-label">捏合强度</span><div class="meter-track"><div id="meterFill" class="meter-fill"></div></div></section>
+  </main>
+
+  <script type="module">
+    import * as THREE from "./vendor/three/three.module.js";
+    import { FilesetResolver, HandLandmarker } from "./vendor/mediapipe/vision_bundle.mjs";
+
+    const WASM_URL="./vendor/mediapipe/wasm";
+    const MODEL_URL="./models/hand_landmarker.task";
+    const app=document.querySelector("#app"), canvas=document.querySelector("#visualizer"), video=document.querySelector("#camera");
+    const status=document.querySelector("#status"), statusText=document.querySelector("#statusText"), launch=document.querySelector("#launch"), startButton=document.querySelector("#startButton"), message=document.querySelector("#message");
+    const mirrorButton=document.querySelector("#mirrorButton"), switchButton=document.querySelector("#switchButton"), cameraButton=document.querySelector("#cameraButton"), gestureMeter=document.querySelector("#gestureMeter"), meterFill=document.querySelector("#meterFill");
+
+    const compactDevice=matchMedia("(max-width: 600px)").matches||((navigator.deviceMemory||8)<=4);
+    const maxPixelRatio=compactDevice?1.4:1.75;
+    let renderer;
+    try{renderer=new THREE.WebGLRenderer({canvas,antialias:false,powerPreference:"high-performance"})}catch(error){message.textContent="此设备需要支持 WebGL 2 才能显示粒子场";message.classList.add("error");startButton.disabled=true;throw error}
+    renderer.setPixelRatio(Math.min(devicePixelRatio||1,maxPixelRatio)); renderer.setSize(innerWidth,innerHeight,false); renderer.setClearColor(0x030405,1); renderer.outputColorSpace=THREE.SRGBColorSpace;
+    const scene=new THREE.Scene(); scene.fog=new THREE.FogExp2(0x030405,.009);
+    const camera3D=new THREE.PerspectiveCamera(54,innerWidth/innerHeight,.1,180); camera3D.position.set(0,0,68);
+
+    const particleCount=compactDevice?Math.min(4800,Math.max(2600,Math.round(innerWidth*innerHeight/185))):Math.min(7600,Math.max(3800,Math.round(innerWidth*innerHeight/150)));
+    const positions=new Float32Array(particleCount*3), bases=new Float32Array(particleCount*3), velocities=new Float32Array(particleCount*3), colors=new Float32Array(particleCount*3), sizes=new Float32Array(particleCount), phases=new Float32Array(particleCount);
+    const color=new THREE.Color();
+    const gaussian=()=>Math.sqrt(-2*Math.log(Math.max(Math.random(),.0001)))*Math.cos(Math.PI*2*Math.random());
+    for(let i=0;i<particleCount;i++){
+      const i3=i*3,dust=Math.random()<.14,radius=dust?12+Math.random()*28:Math.pow(Math.random(),.58)*26,arm=Math.floor(Math.random()*4),angle=arm*Math.PI/2+radius*.29+gaussian()*(dust?.7:.22+radius*.007);
+      const x=Math.cos(angle)*radius,y=Math.sin(angle)*radius*.68,z=gaussian()*(dust?8.5:2.4+radius*.12);
+      bases[i3]=positions[i3]=x; bases[i3+1]=positions[i3+1]=y; bases[i3+2]=positions[i3+2]=z;
+      const gradient=Math.min(radius/40,1),depth=Math.min(Math.abs(z)/14,1),hue=.72+gradient*.15+depth*.025+(Math.random()-.5)*.012,lightness=.48+(1-gradient)*.16+(1-depth)*.07+Math.random()*.06;
+      color.setHSL(hue,.88+Math.random()*.1,Math.min(lightness,.76));
+      colors[i3]=color.r; colors[i3+1]=color.g; colors[i3+2]=color.b; sizes[i]=dust?.9+Math.random()*1.15:1.15+Math.random()*2.35; phases[i]=Math.random()*Math.PI*2;
+    }
+    const geometry=new THREE.BufferGeometry(); geometry.setAttribute("position",new THREE.BufferAttribute(positions,3)); geometry.setAttribute("color",new THREE.BufferAttribute(colors,3)); geometry.setAttribute("aSize",new THREE.BufferAttribute(sizes,1)); geometry.setAttribute("aPhase",new THREE.BufferAttribute(phases,1));
+    const material=new THREE.ShaderMaterial({uniforms:{uTime:{value:0}},vertexShader:`attribute float aSize;attribute float aPhase;varying vec3 vColor;varying float vPulse;varying float vDepthFade;uniform float uTime;void main(){vColor=color;vPulse=.78+.22*sin(uTime*2.1+aPhase);vec4 mvPosition=modelViewMatrix*vec4(position,1.);float cameraDepth=-mvPosition.z;vDepthFade=smoothstep(2.,11.,cameraDepth);gl_PointSize=min(34.,aSize*vPulse*(340./max(5.,cameraDepth)));gl_Position=projectionMatrix*mvPosition;}`,fragmentShader:`varying vec3 vColor;varying float vPulse;varying float vDepthFade;void main(){float d=length(gl_PointCoord-vec2(.5));if(d>.5)discard;float halo=smoothstep(.5,.015,d);float core=smoothstep(.2,0.,d);vec3 glow=vColor*(1.38+core*2.15);float alpha=min(1.,(halo*1.14+core*.76)*vPulse)*vDepthFade;gl_FragColor=vec4(glow,alpha);}`,transparent:true,vertexColors:true,blending:THREE.AdditiveBlending,depthWrite:false});
+    const particles=new THREE.Points(geometry,material); particles.rotation.set(.34,.14,-.04); scene.add(particles);
+    const control={target:new THREE.Vector3(),smoothed:new THREE.Vector3(),pinch:0,desiredPinch:0,handVisible:false,pointerActive:false};
+    let handLandmarker,mediaStream,facingMode="user",mirrorControl=true,lastVideoTime=-1,elapsed=0,releaseEnergy=0,wasPinching=false;
+    const clock=new THREE.Clock();
+    function setStatus(text,mode=""){statusText.textContent=text;status.className=`status ${mode}`.trim()}
+    function screenToWorld(x,y,target=control.target){const height=2*Math.tan(THREE.MathUtils.degToRad(camera3D.fov/2))*camera3D.position.z,width=height*camera3D.aspect;target.set((x-.5)*width,(.5-y)*height,1.5);return target}
+    const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,(a.z||0)-(b.z||0));
+
+    async function createTracker(){
+      setStatus("载入追踪器"); message.textContent="正在载入手部追踪器";
+      const vision=await FilesetResolver.forVisionTasks(WASM_URL),options={baseOptions:{modelAssetPath:MODEL_URL,delegate:"GPU"},runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:.45,minHandPresenceConfidence:.45,minTrackingConfidence:.42};
+      try{handLandmarker=await HandLandmarker.createFromOptions(vision,options)}catch{options.baseOptions.delegate="CPU";handLandmarker=await HandLandmarker.createFromOptions(vision,options)}
+    }
+    async function startCamera(){
+      message.classList.remove("error"); startButton.disabled=true; startButton.textContent="正在启动";
+      try{
+        if(!window.isSecureContext)throw new Error("摄像头需要通过 HTTPS 安全网址打开");
+        if(!navigator.mediaDevices?.getUserMedia)throw new Error("当前浏览器不支持摄像头访问");
+        if(!handLandmarker)await createTracker(); stopMedia(); setStatus("等待摄像头授权"); message.textContent="请允许摄像头访问";
+        mediaStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:facingMode},width:{ideal:960},height:{ideal:720}}}); video.srcObject=mediaStream; await video.play();
+        launch.classList.add("hidden"); switchButton.disabled=false; cameraButton.disabled=false; gestureMeter.classList.add("visible"); setStatus("寻找手掌","live"); lastVideoTime=-1;
+      }catch(error){startButton.disabled=false;startButton.textContent="重新尝试";message.classList.add("error");message.textContent=error?.name==="NotAllowedError"?"摄像头权限被拒绝，请在地址栏中改为允许":(error?.message||"无法开启摄像头");setStatus("摄像头未开启","error");launch.classList.remove("hidden")}
+    }
+    function stopMedia(){if(mediaStream)mediaStream.getTracks().forEach(track=>track.stop());mediaStream=null;video.srcObject=null;control.handVisible=false;control.desiredPinch=0}
+    function stopCamera(){stopMedia();switchButton.disabled=true;cameraButton.disabled=true;gestureMeter.classList.remove("visible");startButton.disabled=false;startButton.textContent="再次开启";message.classList.remove("error");message.textContent="粒子继续自由漂移";launch.classList.remove("hidden");setStatus("自由漂移")}
+    async function switchCamera(){facingMode=facingMode==="user"?"environment":"user";mirrorControl=facingMode==="user";switchButton.disabled=true;await startCamera()}
+    function readHand(){
+      if(!mediaStream||!handLandmarker||video.readyState<2||video.currentTime===lastVideoTime)return; lastVideoTime=video.currentTime;
+      const result=handLandmarker.detectForVideo(video,performance.now()),hand=result.landmarks?.[0];
+      if(!hand){control.handVisible=false;control.desiredPinch=control.pointerActive?1:0;setStatus("寻找手掌","live");return}
+      const thumb=hand[4],index=hand[8],palmScale=distance(hand[0],hand[9])||.1,ratio=distance(thumb,index)/palmScale,pinch=THREE.MathUtils.clamp((1.05-ratio)/.72,0,1),screenX=(thumb.x+index.x)*.5,screenY=(thumb.y+index.y)*.5;
+      if(!control.pointerActive){screenToWorld(mirrorControl?1-screenX:screenX,screenY);control.desiredPinch=pinch}
+      control.handVisible=true;setStatus(pinch>.18?"捏合牵引":"手掌已追踪",pinch>.18?"pinch":"live");
+    }
+    function triggerReleaseBurst(){
+      const pos=geometry.attributes.position.array;
+      for(let i=0;i<particleCount;i++){
+        const i3=i*3,dx=pos[i3]-control.smoothed.x,dy=pos[i3+1]-control.smoothed.y,planar=Math.hypot(dx,dy)+.001,proximity=Math.exp(-planar*.045),angle=Math.atan2(dy,dx)+(Math.random()-.5)*.75,kick=(.11+Math.random()*.31)*(.5+proximity);
+        velocities[i3]+=Math.cos(angle)*kick;
+        velocities[i3+1]+=Math.sin(angle)*kick;
+        velocities[i3+2]+=(.24+Math.random()*.72)*(.55+proximity*.75);
+      }
+      releaseEnergy=1;
+      setStatus("纵深扩散",mediaStream?"live":"");
+    }
+    function updateParticles(){
+      const pos=geometry.attributes.position.array,active=control.pinch,baseRotation=elapsed*.035,cosR=Math.cos(baseRotation),sinR=Math.sin(baseRotation);control.smoothed.lerp(control.target,.26);
+      for(let i=0;i<particleCount;i++){
+        const i3=i*3;let px=pos[i3],py=pos[i3+1],pz=pos[i3+2],vx=velocities[i3],vy=velocities[i3+1],vz=velocities[i3+2];
+        const bx=bases[i3]*cosR-bases[i3+1]*sinR,by=bases[i3]*sinR+bases[i3+1]*cosR,bz=bases[i3+2]+Math.sin(elapsed*.6+phases[i])*.3,spring=(.00048+(1-active)*.00135)*(1-releaseEnergy*.9);
+        vx+=(bx-px)*spring;vy+=(by-py)*spring;vz+=(bz-pz)*spring;
+        if(active>.01){const dx=control.smoothed.x-px,dy=control.smoothed.y-py,dz=control.smoothed.z-pz,distSq=dx*dx+dy*dy+dz*dz+6,invDist=1/Math.sqrt(distSq),pull=Math.min(.16,1.8/distSq)*active,swirl=.0012*active/(1+distSq*.005);vx+=dx*invDist*pull-dy*swirl;vy+=dy*invDist*pull+dx*swirl;vz+=dz*invDist*pull}
+        if(releaseEnergy>.01){vx+=(px-control.smoothed.x)*.00055*releaseEnergy;vy+=(py-control.smoothed.y)*.00055*releaseEnergy;vz+=.0045*releaseEnergy}
+        const damping=releaseEnergy>.02?.987:(active>.04?.97:.946);vx*=damping;vy*=damping;vz*=damping;const speed=Math.hypot(vx,vy,vz),maxSpeed=releaseEnergy>.02?1.45:.95;if(speed>maxSpeed){const limit=maxSpeed/speed;vx*=limit;vy*=limit;vz*=limit}
+        if(pz>60){px=bx+(Math.random()-.5)*5;py=by+(Math.random()-.5)*5;pz=-42-Math.random()*14;vx*=.18;vy*=.18;vz=.08+Math.random()*.12}
+        pos[i3]=px+vx;pos[i3+1]=py+vy;pos[i3+2]=pz+vz;velocities[i3]=vx;velocities[i3+1]=vy;velocities[i3+2]=vz;
+      }
+      geometry.attributes.position.needsUpdate=true;
+    }
+    function animate(){requestAnimationFrame(animate);const delta=Math.min(clock.getDelta(),.033);elapsed+=delta;readHand();if(control.desiredPinch>.34)wasPinching=true;else if(wasPinching&&control.desiredPinch<.08){triggerReleaseBurst();wasPinching=false}control.pinch+=(control.desiredPinch-control.pinch)*.24;releaseEnergy*=.958;meterFill.style.width=`${Math.round(control.pinch*100)}%`;updateParticles();material.uniforms.uTime.value=elapsed;particles.rotation.x=.34+Math.sin(elapsed*.14)*.08;particles.rotation.y=.14+Math.sin(elapsed*.11)*.17;camera3D.position.x+=(control.smoothed.x*.035*control.pinch-camera3D.position.x)*.035;camera3D.position.y+=(control.smoothed.y*.025*control.pinch-camera3D.position.y)*.035;camera3D.lookAt(0,0,0);renderer.render(scene,camera3D)}
+    function pointerTarget(event){screenToWorld(event.clientX/innerWidth,event.clientY/innerHeight)}
+    app.addEventListener("pointerdown",event=>{if(event.target.closest("button"))return;control.pointerActive=true;control.desiredPinch=1;pointerTarget(event);setStatus("牵引粒子","pinch");app.setPointerCapture?.(event.pointerId)});
+    app.addEventListener("pointermove",event=>{if(control.pointerActive)pointerTarget(event)});
+    app.addEventListener("pointerup",()=>{control.pointerActive=false;control.desiredPinch=control.handVisible?control.desiredPinch:0;if(!control.handVisible)setStatus(mediaStream?"寻找手掌":"自由漂移",mediaStream?"live":"")});
+    app.addEventListener("pointercancel",()=>{control.pointerActive=false;if(!control.handVisible)control.desiredPinch=0});
+    window.addEventListener("resize",()=>{camera3D.aspect=innerWidth/innerHeight;camera3D.updateProjectionMatrix();renderer.setPixelRatio(Math.min(devicePixelRatio||1,maxPixelRatio));renderer.setSize(innerWidth,innerHeight,false)});
+    startButton.addEventListener("click",startCamera);cameraButton.addEventListener("click",stopCamera);switchButton.addEventListener("click",switchCamera);mirrorButton.addEventListener("click",()=>{mirrorControl=!mirrorControl});window.addEventListener("beforeunload",stopMedia);
+    screenToWorld(.5,.5);control.smoothed.copy(control.target);animate();
+    if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1")){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").then(()=>navigator.serviceWorker.ready).then(()=>{document.documentElement.dataset.offline="ready"}).catch(()=>{document.documentElement.dataset.offline="unavailable"}))}
+  </script>
+</body>
+</html>

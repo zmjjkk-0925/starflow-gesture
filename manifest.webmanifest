@@ -1,0 +1,19 @@
+{
+  "name": "星流 - 手势粒子场",
+  "short_name": "星流",
+  "description": "使用手势控制三维渐变紫色粒子场",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#030405",
+  "theme_color": "#030405",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
