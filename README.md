@@ -8,7 +8,7 @@ https://zmjjkk-0925.github.io/starflow-gesture/
 
 ## Features
 
-- MediaPipe one-hand and two-hand tracking with local model and WASM assets
+- MediaPipe one-hand and two-hand tracking with lower-light detection, per-hand dropout recovery, and local model/WASM assets
 - Three.js particle rendering with depth, glow, and perspective
 - One-hand pinch attraction and three-dimensional release burst
 - Two-hand gather and expansion control based on palm distance

@@ -143,7 +143,7 @@
       else rawHands.forEach((hand,handIndex)=>hand.forEach((point,pointIndex)=>{const smooth=smoothedGestureHands[handIndex][pointIndex];smooth.x=THREE.MathUtils.lerp(smooth.x,point.x,.46);smooth.y=THREE.MathUtils.lerp(smooth.y,point.y,.46);smooth.z=THREE.MathUtils.lerp(smooth.z,point.z||0,.38)}));
       const hands=smoothedGestureHands,worldHeight=2*Math.tan(THREE.MathUtils.degToRad(camera3D.fov/2))*camera3D.position.z,worldWidth=worldHeight*camera3D.aspect,target=shapeTargets.gesture;
       for(let i=0;i<particleCount;i++){
-        const hand=hands[i%hands.length],palmScale=distance(hand[0],hand[9])||.1,kind=gestureKinds[i],part=gestureParts[i];let x,y,z;
+        const hand=hands[i%hands.length],palmScale=handScale(hand),kind=gestureKinds[i],part=gestureParts[i];let x,y,z;
         if(kind===0){const [ai,bi,startWidth,endWidth]=fingerSegments[part],a=hand[ai],b=hand[bi],t=gestureU[i],dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy)||.001,side=gestureV[i]*2-1,width=THREE.MathUtils.lerp(startWidth,endWidth,t)*palmScale,thickness=side*width;x=THREE.MathUtils.lerp(a.x,b.x,t)-dy/length*thickness;y=THREE.MathUtils.lerp(a.y,b.y,t)+dx/length*thickness;z=THREE.MathUtils.lerp(a.z||0,b.z||0,t)+gestureJitter[i]*width*.34}
         else if(kind===1){const [ai,bi,ci]=palmTriangles[part],a=hand[ai],b=hand[bi],c=hand[ci],su=Math.sqrt(gestureU[i]),u=1-su,v=su*(1-gestureV[i]),w=su*gestureV[i];x=a.x*u+b.x*v+c.x*w;y=a.y*u+b.y*v+c.y*w;z=(a.z||0)*u+(b.z||0)*v+(c.z||0)*w+gestureJitter[i]*palmScale*.018}
         else{const joint=hand[part],angle=gestureV[i]*Math.PI*2,tip=part>0&&part%4===0,radius=Math.sqrt(gestureU[i])*palmScale*(tip?.072:.1);x=joint.x+Math.cos(angle)*radius;y=joint.y+Math.sin(angle)*radius;z=(joint.z||0)+gestureJitter[i]*palmScale*.024}
@@ -160,16 +160,30 @@
     function applyPalette(name){name=palettes[name]?name:"violet";const palette=palettes[name];for(let i=0;i<particleCount;i++){const i3=i*3,bx=bases[i3],by=bases[i3+1],bz=bases[i3+2],radius=Math.hypot(bx,by),gradient=Math.min(radius/40,1),depth=Math.min(Math.abs(bz)/14,1),hue=palette.start+(palette.end-palette.start)*gradient+depth*.018+(Math.random()-.5)*.012,lightness=palette.light+(1-gradient)*.13+(1-depth)*.07+Math.random()*.045;color.setHSL((hue+1)%1,palette.saturation,Math.min(lightness,.82));colors[i3]=color.r;colors[i3+1]=color.g;colors[i3+2]=color.b;}geometry.attributes.color.needsUpdate=true;swatches.forEach(swatch=>swatch.setAttribute("aria-pressed",String(swatch.dataset.palette===name)));paletteButton.setAttribute("aria-label",`更换粒子颜色，当前为${swatches.find(swatch=>swatch.dataset.palette===name)?.getAttribute("aria-label")||"渐变紫"}`);try{localStorage.setItem("starflow-palette",name)}catch{}}
     try{applyShape(localStorage.getItem("starflow-shape")||"flow");applyPalette(localStorage.getItem("starflow-palette")||"violet");applyDiffusionMode(localStorage.getItem("starflow-diffusion")||"radial")}catch{applyShape("flow");applyPalette("violet");applyDiffusionMode("radial")}
     const control={target:new THREE.Vector3(),smoothed:new THREE.Vector3(),pinch:0,desiredPinch:0,handVisible:false,handCount:0,pointerActive:false,dualScale:1,desiredDualScale:1,dualMotion:0,desiredDualMotion:0,dualSpread:.5};
-    let handLandmarker,mediaStream,facingMode="user",mirrorControl=true,lastVideoTime=-1,elapsed=0,releaseEnergy=0,releaseAge=0,diffusionSpin=0,wasPinching=false,lastHandSeparation=null;
+    let handLandmarker,mediaStream,facingMode="user",mirrorControl=true,lastVideoTime=-1,elapsed=0,releaseEnergy=0,releaseAge=0,diffusionSpin=0,wasPinching=false,lastHandSeparation=null,trackedHands=[];
     if(activeShape==="gesture"){meterLabel.textContent="手势映射";message.textContent="开启摄像头，粒子将镜像模仿你的手势";mirrorButton.setAttribute("aria-label","关闭手势镜像")}
     const clock=new THREE.Clock();
     function setStatus(text,mode=""){statusText.textContent=text;status.className=`status ${mode}`.trim()}
     function screenToWorld(x,y,target=control.target){const height=2*Math.tan(THREE.MathUtils.degToRad(camera3D.fov/2))*camera3D.position.z,width=height*camera3D.aspect;target.set((x-.5)*width,(.5-y)*height,1.5);return target}
     const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,(a.z||0)-(b.z||0));
+    const handScale=hand=>(distance(hand[0],hand[9])+distance(hand[5],hand[17])*1.15)*.5||.1;
+    const handTrackingGrace=260;
+    function stabilizeHands(detections,now){
+      trackedHands=trackedHands.filter(track=>now-track.lastSeen<handTrackingGrace);
+      const used=new Set();
+      detections.forEach(hand=>{
+        let bestIndex=-1,bestDistance=.3;
+        trackedHands.forEach((track,index)=>{if(used.has(index))return;const separation=Math.hypot(hand[9].x-track.landmarks[9].x,hand[9].y-track.landmarks[9].y);if(separation<bestDistance){bestDistance=separation;bestIndex=index}});
+        if(bestIndex<0){trackedHands.push({landmarks:hand.map(point=>({x:point.x,y:point.y,z:point.z||0})),lastSeen:now});used.add(trackedHands.length-1);return}
+        const track=trackedHands[bestIndex];hand.forEach((point,index)=>{const smooth=track.landmarks[index];smooth.x=THREE.MathUtils.lerp(smooth.x,point.x,.74);smooth.y=THREE.MathUtils.lerp(smooth.y,point.y,.74);smooth.z=THREE.MathUtils.lerp(smooth.z,point.z||0,.64)});track.lastSeen=now;used.add(bestIndex);
+      });
+      trackedHands=trackedHands.sort((a,b)=>b.lastSeen-a.lastSeen).slice(0,2);
+      return trackedHands.sort((a,b)=>a.landmarks[9].x-b.landmarks[9].x).map(track=>track.landmarks);
+    }
 
     async function createTracker(){
       setStatus("载入追踪器"); message.textContent="正在载入手部追踪器";
-      const vision=await FilesetResolver.forVisionTasks(WASM_URL),options={baseOptions:{modelAssetPath:MODEL_URL,delegate:"GPU"},runningMode:"VIDEO",numHands:2,minHandDetectionConfidence:.42,minHandPresenceConfidence:.42,minTrackingConfidence:.4};
+      const vision=await FilesetResolver.forVisionTasks(WASM_URL),options={baseOptions:{modelAssetPath:MODEL_URL,delegate:"GPU"},runningMode:"VIDEO",numHands:2,minHandDetectionConfidence:.36,minHandPresenceConfidence:.34,minTrackingConfidence:.3};
       try{handLandmarker=await HandLandmarker.createFromOptions(vision,options)}catch{options.baseOptions.delegate="CPU";handLandmarker=await HandLandmarker.createFromOptions(vision,options)}
     }
     async function startCamera(){
@@ -178,16 +192,16 @@
         if(!window.isSecureContext)throw new Error("摄像头需要通过 HTTPS 安全网址打开");
         if(!navigator.mediaDevices?.getUserMedia)throw new Error("当前浏览器不支持摄像头访问");
         if(!handLandmarker)await createTracker(); stopMedia(); setStatus("等待摄像头授权"); message.textContent="请允许摄像头访问";
-        mediaStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:facingMode},width:{ideal:960},height:{ideal:720}}}); video.srcObject=mediaStream; await video.play();
+        mediaStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:facingMode},width:{ideal:compactDevice?960:1280},height:{ideal:720},frameRate:{ideal:30},focusMode:{ideal:"continuous"}}}); video.srcObject=mediaStream; await video.play();
         launch.classList.add("hidden"); switchButton.disabled=false; cameraButton.disabled=false; gestureMeter.classList.add("visible"); setStatus("寻找手掌","live"); lastVideoTime=-1;
       }catch(error){startButton.disabled=false;startButton.textContent="重新尝试";message.classList.add("error");message.textContent=error?.name==="NotAllowedError"?"摄像头权限被拒绝，请在地址栏中改为允许":(error?.message||"无法开启摄像头");setStatus("摄像头未开启","error");launch.classList.remove("hidden")}
     }
-    function stopMedia(){if(mediaStream)mediaStream.getTracks().forEach(track=>track.stop());mediaStream=null;video.srcObject=null;control.handVisible=false;control.handCount=0;control.desiredPinch=0;control.desiredDualScale=1;control.desiredDualMotion=0;gestureHasPose=false;smoothedGestureHands=[];lastHandSeparation=null}
+    function stopMedia(){if(mediaStream)mediaStream.getTracks().forEach(track=>track.stop());mediaStream=null;video.srcObject=null;control.handVisible=false;control.handCount=0;control.desiredPinch=0;control.desiredDualScale=1;control.desiredDualMotion=0;gestureHasPose=false;smoothedGestureHands=[];trackedHands=[];lastHandSeparation=null}
     function stopCamera(){stopMedia();switchButton.disabled=true;cameraButton.disabled=true;gestureMeter.classList.remove("visible");startButton.disabled=false;startButton.textContent="再次开启";message.classList.remove("error");message.textContent=activeShape==="gesture"?"开启摄像头，粒子将继续镜像模仿你的手势":"粒子继续自由漂移";launch.classList.remove("hidden");setStatus(activeShape==="gesture"?"等待手势":"自由漂移")}
     async function switchCamera(){facingMode=facingMode==="user"?"environment":"user";mirrorControl=facingMode==="user";switchButton.disabled=true;await startCamera()}
     function readHand(){
       if(!mediaStream||!handLandmarker||video.readyState<2||video.currentTime===lastVideoTime)return; lastVideoTime=video.currentTime;
-      const result=handLandmarker.detectForVideo(video,performance.now()),hands=result.landmarks||[],hand=hands[0];
+      const now=performance.now(),result=handLandmarker.detectForVideo(video,now),hands=stabilizeHands(result.landmarks||[],now),hand=hands[0];
       control.handCount=hands.length;control.handVisible=hands.length>0;
       if(!hand){control.desiredPinch=control.pointerActive?1:0;control.desiredDualScale=1;control.desiredDualMotion=0;gestureHasPose=false;smoothedGestureHands=[];lastHandSeparation=null;meterLabel.textContent=activeShape==="gesture"?"手势映射":"单手捏合";setStatus("寻找手掌","live");return}
       if(activeShape==="gesture"){updateGestureTargets(hands);control.desiredPinch=0;control.desiredDualScale=1;control.desiredDualMotion=0;lastHandSeparation=null;wasPinching=false;meterLabel.textContent=hands.length>1?"双手映射":"手势映射";setStatus(hands.length>1?"正在模仿双手":"正在模仿手势","pinch");return}
@@ -198,7 +212,7 @@
         setStatus(control.desiredDualMotion>.12?`${diffusionModes[diffusionMode]}·双手扩散`:control.desiredDualMotion<-.12?"双手聚拢":"双手控制",control.desiredDualMotion>.12?"pinch":"live");return;
       }
       lastHandSeparation=null;control.desiredDualScale=1;control.desiredDualMotion=0;meterLabel.textContent="单手捏合";
-      const thumb=hand[4],index=hand[8],palmScale=distance(hand[0],hand[9])||.1,ratio=distance(thumb,index)/palmScale,pinch=THREE.MathUtils.clamp((1.05-ratio)/.72,0,1),screenX=(thumb.x+index.x)*.5,screenY=(thumb.y+index.y)*.5;
+      const thumb=hand[4],index=hand[8],palmScale=handScale(hand),ratio=distance(thumb,index)/palmScale,pinch=THREE.MathUtils.clamp((1.05-ratio)/.72,0,1),screenX=(thumb.x+index.x)*.5,screenY=(thumb.y+index.y)*.5;
       if(!control.pointerActive){screenToWorld(mirrorControl?1-screenX:screenX,screenY);control.desiredPinch=pinch}
       setStatus(pinch>.18?"单手捏合":"单手已追踪",pinch>.18?"pinch":"live");
     }
