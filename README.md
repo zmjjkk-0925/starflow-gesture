@@ -14,7 +14,7 @@ https://zmjjkk-0925.github.io/starflow-gesture/
 - Two-hand gather and expansion control based on palm distance
 - Switchable particle palettes: violet, aurora aqua, ember, and glacier blue
 - Switchable gather forms: nebula, sphere, ring, heart, and spiral
-- Switchable diffusion modes: radial starburst, vortex, depth fountain, and ripple shockwave
+- Strongly differentiated diffusion modes: radial starburst, rotating vortex, forward depth fountain, and travelling ripple shockwave
 - Responsive performance settings for phones and computers
 - Installable PWA with offline asset caching
 - Pointer and touch fallback when camera access is unavailable
