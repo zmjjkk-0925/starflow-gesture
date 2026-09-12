@@ -1,4 +1,4 @@
-const CACHE_NAME = "starflow-v9";
+const CACHE_NAME = "starflow-v10";
 const APP_FILES = [
   "./",
   "./index.html",
