@@ -1,6 +1,6 @@
 # Starflow Gesture
 
-An interactive 3D purple particle field controlled by hand gestures. Pinch to attract particles, move your hand to pull the field, and release to send particles flying toward the camera.
+An interactive 3D purple particle field controlled by one or two hands. Pinch with one hand to attract particles and release to send them toward the camera. With two hands, move your palms together to gather the field or apart to expand it in three dimensions.
 
 ## Live site
 
@@ -8,9 +8,10 @@ https://zmjjkk-0925.github.io/starflow-gesture/
 
 ## Features
 
-- MediaPipe hand tracking with local model and WASM assets
+- MediaPipe one-hand and two-hand tracking with local model and WASM assets
 - Three.js particle rendering with depth, glow, and perspective
-- Pinch attraction and three-dimensional release burst
+- One-hand pinch attraction and three-dimensional release burst
+- Two-hand gather and expansion control based on palm distance
 - Responsive performance settings for phones and computers
 - Installable PWA with offline asset caching
 - Pointer and touch fallback when camera access is unavailable

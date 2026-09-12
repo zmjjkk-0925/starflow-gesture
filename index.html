@@ -68,7 +68,7 @@
       </nav>
     </header>
     <section id="launch" class="launch"><button id="startButton" class="launch-button" type="button">开启摄像头</button><p id="message" class="message">粒子已就绪</p></section>
-    <section id="gestureMeter" class="gesture-meter" aria-live="polite"><span class="meter-label">捏合强度</span><div class="meter-track"><div id="meterFill" class="meter-fill"></div></div></section>
+    <section id="gestureMeter" class="gesture-meter" aria-live="polite"><span id="meterLabel" class="meter-label">单手捏合</span><div class="meter-track"><div id="meterFill" class="meter-fill"></div></div></section>
   </main>
 
   <script type="module">
@@ -79,7 +79,7 @@
     const MODEL_URL="./models/hand_landmarker.task";
     const app=document.querySelector("#app"), canvas=document.querySelector("#visualizer"), video=document.querySelector("#camera");
     const status=document.querySelector("#status"), statusText=document.querySelector("#statusText"), launch=document.querySelector("#launch"), startButton=document.querySelector("#startButton"), message=document.querySelector("#message");
-    const mirrorButton=document.querySelector("#mirrorButton"), switchButton=document.querySelector("#switchButton"), cameraButton=document.querySelector("#cameraButton"), gestureMeter=document.querySelector("#gestureMeter"), meterFill=document.querySelector("#meterFill");
+    const mirrorButton=document.querySelector("#mirrorButton"), switchButton=document.querySelector("#switchButton"), cameraButton=document.querySelector("#cameraButton"), gestureMeter=document.querySelector("#gestureMeter"), meterLabel=document.querySelector("#meterLabel"), meterFill=document.querySelector("#meterFill");
 
     const compactDevice=matchMedia("(max-width: 600px)").matches||((navigator.deviceMemory||8)<=4);
     const maxPixelRatio=compactDevice?1.4:1.75;
@@ -104,8 +104,8 @@
     const geometry=new THREE.BufferGeometry(); geometry.setAttribute("position",new THREE.BufferAttribute(positions,3)); geometry.setAttribute("color",new THREE.BufferAttribute(colors,3)); geometry.setAttribute("aSize",new THREE.BufferAttribute(sizes,1)); geometry.setAttribute("aPhase",new THREE.BufferAttribute(phases,1));
     const material=new THREE.ShaderMaterial({uniforms:{uTime:{value:0}},vertexShader:`attribute float aSize;attribute float aPhase;varying vec3 vColor;varying float vPulse;varying float vDepthFade;uniform float uTime;void main(){vColor=color;vPulse=.78+.22*sin(uTime*2.1+aPhase);vec4 mvPosition=modelViewMatrix*vec4(position,1.);float cameraDepth=-mvPosition.z;vDepthFade=smoothstep(2.,11.,cameraDepth);gl_PointSize=min(34.,aSize*vPulse*(340./max(5.,cameraDepth)));gl_Position=projectionMatrix*mvPosition;}`,fragmentShader:`varying vec3 vColor;varying float vPulse;varying float vDepthFade;void main(){float d=length(gl_PointCoord-vec2(.5));if(d>.5)discard;float halo=smoothstep(.5,.015,d);float core=smoothstep(.2,0.,d);vec3 glow=vColor*(1.38+core*2.15);float alpha=min(1.,(halo*1.14+core*.76)*vPulse)*vDepthFade;gl_FragColor=vec4(glow,alpha);}`,transparent:true,vertexColors:true,blending:THREE.AdditiveBlending,depthWrite:false});
     const particles=new THREE.Points(geometry,material); particles.rotation.set(.34,.14,-.04); scene.add(particles);
-    const control={target:new THREE.Vector3(),smoothed:new THREE.Vector3(),pinch:0,desiredPinch:0,handVisible:false,pointerActive:false};
-    let handLandmarker,mediaStream,facingMode="user",mirrorControl=true,lastVideoTime=-1,elapsed=0,releaseEnergy=0,wasPinching=false;
+    const control={target:new THREE.Vector3(),smoothed:new THREE.Vector3(),pinch:0,desiredPinch:0,handVisible:false,handCount:0,pointerActive:false,dualScale:1,desiredDualScale:1,dualMotion:0,desiredDualMotion:0,dualSpread:.5};
+    let handLandmarker,mediaStream,facingMode="user",mirrorControl=true,lastVideoTime=-1,elapsed=0,releaseEnergy=0,wasPinching=false,lastHandSeparation=null;
     const clock=new THREE.Clock();
     function setStatus(text,mode=""){statusText.textContent=text;status.className=`status ${mode}`.trim()}
     function screenToWorld(x,y,target=control.target){const height=2*Math.tan(THREE.MathUtils.degToRad(camera3D.fov/2))*camera3D.position.z,width=height*camera3D.aspect;target.set((x-.5)*width,(.5-y)*height,1.5);return target}
@@ -113,7 +113,7 @@
 
     async function createTracker(){
       setStatus("载入追踪器"); message.textContent="正在载入手部追踪器";
-      const vision=await FilesetResolver.forVisionTasks(WASM_URL),options={baseOptions:{modelAssetPath:MODEL_URL,delegate:"GPU"},runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:.45,minHandPresenceConfidence:.45,minTrackingConfidence:.42};
+      const vision=await FilesetResolver.forVisionTasks(WASM_URL),options={baseOptions:{modelAssetPath:MODEL_URL,delegate:"GPU"},runningMode:"VIDEO",numHands:2,minHandDetectionConfidence:.42,minHandPresenceConfidence:.42,minTrackingConfidence:.4};
       try{handLandmarker=await HandLandmarker.createFromOptions(vision,options)}catch{options.baseOptions.delegate="CPU";handLandmarker=await HandLandmarker.createFromOptions(vision,options)}
     }
     async function startCamera(){
@@ -126,16 +126,24 @@
         launch.classList.add("hidden"); switchButton.disabled=false; cameraButton.disabled=false; gestureMeter.classList.add("visible"); setStatus("寻找手掌","live"); lastVideoTime=-1;
       }catch(error){startButton.disabled=false;startButton.textContent="重新尝试";message.classList.add("error");message.textContent=error?.name==="NotAllowedError"?"摄像头权限被拒绝，请在地址栏中改为允许":(error?.message||"无法开启摄像头");setStatus("摄像头未开启","error");launch.classList.remove("hidden")}
     }
-    function stopMedia(){if(mediaStream)mediaStream.getTracks().forEach(track=>track.stop());mediaStream=null;video.srcObject=null;control.handVisible=false;control.desiredPinch=0}
+    function stopMedia(){if(mediaStream)mediaStream.getTracks().forEach(track=>track.stop());mediaStream=null;video.srcObject=null;control.handVisible=false;control.handCount=0;control.desiredPinch=0;control.desiredDualScale=1;control.desiredDualMotion=0;lastHandSeparation=null}
     function stopCamera(){stopMedia();switchButton.disabled=true;cameraButton.disabled=true;gestureMeter.classList.remove("visible");startButton.disabled=false;startButton.textContent="再次开启";message.classList.remove("error");message.textContent="粒子继续自由漂移";launch.classList.remove("hidden");setStatus("自由漂移")}
     async function switchCamera(){facingMode=facingMode==="user"?"environment":"user";mirrorControl=facingMode==="user";switchButton.disabled=true;await startCamera()}
     function readHand(){
       if(!mediaStream||!handLandmarker||video.readyState<2||video.currentTime===lastVideoTime)return; lastVideoTime=video.currentTime;
-      const result=handLandmarker.detectForVideo(video,performance.now()),hand=result.landmarks?.[0];
-      if(!hand){control.handVisible=false;control.desiredPinch=control.pointerActive?1:0;setStatus("寻找手掌","live");return}
+      const result=handLandmarker.detectForVideo(video,performance.now()),hands=result.landmarks||[],hand=hands[0];
+      control.handCount=hands.length;control.handVisible=hands.length>0;
+      if(!hand){control.desiredPinch=control.pointerActive?1:0;control.desiredDualScale=1;control.desiredDualMotion=0;lastHandSeparation=null;meterLabel.textContent="单手捏合";setStatus("寻找手掌","live");return}
+      if(hands.length>1&&!control.pointerActive){
+        const a=hands[0][9],b=hands[1][9],screenX=(a.x+b.x)*.5,screenY=(a.y+b.y)*.5,separation=Math.hypot(a.x-b.x,a.y-b.y),spread=THREE.MathUtils.smoothstep(separation,.13,.68);
+        screenToWorld(mirrorControl?1-screenX:screenX,screenY);control.desiredPinch=0;control.dualSpread=spread;control.desiredDualScale=THREE.MathUtils.lerp(.42,1.82,spread);
+        const separationDelta=lastHandSeparation===null?0:separation-lastHandSeparation;control.desiredDualMotion=THREE.MathUtils.clamp(separationDelta/.018,-1,1);lastHandSeparation=separation;wasPinching=false;meterLabel.textContent="双手开合";
+        setStatus(control.desiredDualMotion>.12?"双手扩散":control.desiredDualMotion<-.12?"双手聚拢":"双手控制",control.desiredDualMotion>.12?"pinch":"live");return;
+      }
+      lastHandSeparation=null;control.desiredDualScale=1;control.desiredDualMotion=0;meterLabel.textContent="单手捏合";
       const thumb=hand[4],index=hand[8],palmScale=distance(hand[0],hand[9])||.1,ratio=distance(thumb,index)/palmScale,pinch=THREE.MathUtils.clamp((1.05-ratio)/.72,0,1),screenX=(thumb.x+index.x)*.5,screenY=(thumb.y+index.y)*.5;
       if(!control.pointerActive){screenToWorld(mirrorControl?1-screenX:screenX,screenY);control.desiredPinch=pinch}
-      control.handVisible=true;setStatus(pinch>.18?"捏合牵引":"手掌已追踪",pinch>.18?"pinch":"live");
+      setStatus(pinch>.18?"单手捏合":"单手已追踪",pinch>.18?"pinch":"live");
     }
     function triggerReleaseBurst(){
       const pos=geometry.attributes.position.array;
@@ -149,20 +157,21 @@
       setStatus("纵深扩散",mediaStream?"live":"");
     }
     function updateParticles(){
-      const pos=geometry.attributes.position.array,active=control.pinch,baseRotation=elapsed*.035,cosR=Math.cos(baseRotation),sinR=Math.sin(baseRotation);control.smoothed.lerp(control.target,.26);
+      const pos=geometry.attributes.position.array,active=control.pinch,dualScale=control.dualScale,dualExpand=Math.max(0,control.dualMotion),baseRotation=elapsed*.035,cosR=Math.cos(baseRotation),sinR=Math.sin(baseRotation);control.smoothed.lerp(control.target,.26);
       for(let i=0;i<particleCount;i++){
         const i3=i*3;let px=pos[i3],py=pos[i3+1],pz=pos[i3+2],vx=velocities[i3],vy=velocities[i3+1],vz=velocities[i3+2];
-        const bx=bases[i3]*cosR-bases[i3+1]*sinR,by=bases[i3]*sinR+bases[i3+1]*cosR,bz=bases[i3+2]+Math.sin(elapsed*.6+phases[i])*.3,spring=(.00048+(1-active)*.00135)*(1-releaseEnergy*.9);
+        const bx=(bases[i3]*cosR-bases[i3+1]*sinR)*dualScale,by=(bases[i3]*sinR+bases[i3+1]*cosR)*dualScale,bz=bases[i3+2]*(.72+dualScale*.35)+Math.sin(elapsed*.6+phases[i])*.3,spring=(.00048+(1-active)*.00135)*(1-releaseEnergy*.9)*(control.handCount>1?1.7:1);
         vx+=(bx-px)*spring;vy+=(by-py)*spring;vz+=(bz-pz)*spring;
         if(active>.01){const dx=control.smoothed.x-px,dy=control.smoothed.y-py,dz=control.smoothed.z-pz,distSq=dx*dx+dy*dy+dz*dz+6,invDist=1/Math.sqrt(distSq),pull=Math.min(.16,1.8/distSq)*active,swirl=.0012*active/(1+distSq*.005);vx+=dx*invDist*pull-dy*swirl;vy+=dy*invDist*pull+dx*swirl;vz+=dz*invDist*pull}
+        if(dualExpand>.02){const dx=px-control.smoothed.x,dy=py-control.smoothed.y,planar=Math.hypot(dx,dy)+.001,kick=.0038*dualExpand;vx+=dx/planar*kick;vy+=dy/planar*kick;vz+=(.006+Math.random()*.01)*dualExpand}
         if(releaseEnergy>.01){vx+=(px-control.smoothed.x)*.00055*releaseEnergy;vy+=(py-control.smoothed.y)*.00055*releaseEnergy;vz+=.0045*releaseEnergy}
-        const damping=releaseEnergy>.02?.987:(active>.04?.97:.946);vx*=damping;vy*=damping;vz*=damping;const speed=Math.hypot(vx,vy,vz),maxSpeed=releaseEnergy>.02?1.45:.95;if(speed>maxSpeed){const limit=maxSpeed/speed;vx*=limit;vy*=limit;vz*=limit}
+        const damping=releaseEnergy>.02?.987:(dualExpand>.02?.975:(active>.04?.97:.946));vx*=damping;vy*=damping;vz*=damping;const speed=Math.hypot(vx,vy,vz),maxSpeed=releaseEnergy>.02?1.45:(dualExpand>.02?1.12:.95);if(speed>maxSpeed){const limit=maxSpeed/speed;vx*=limit;vy*=limit;vz*=limit}
         if(pz>60){px=bx+(Math.random()-.5)*5;py=by+(Math.random()-.5)*5;pz=-42-Math.random()*14;vx*=.18;vy*=.18;vz=.08+Math.random()*.12}
         pos[i3]=px+vx;pos[i3+1]=py+vy;pos[i3+2]=pz+vz;velocities[i3]=vx;velocities[i3+1]=vy;velocities[i3+2]=vz;
       }
       geometry.attributes.position.needsUpdate=true;
     }
-    function animate(){requestAnimationFrame(animate);const delta=Math.min(clock.getDelta(),.033);elapsed+=delta;readHand();if(control.desiredPinch>.34)wasPinching=true;else if(wasPinching&&control.desiredPinch<.08){triggerReleaseBurst();wasPinching=false}control.pinch+=(control.desiredPinch-control.pinch)*.24;releaseEnergy*=.958;meterFill.style.width=`${Math.round(control.pinch*100)}%`;updateParticles();material.uniforms.uTime.value=elapsed;particles.rotation.x=.34+Math.sin(elapsed*.14)*.08;particles.rotation.y=.14+Math.sin(elapsed*.11)*.17;camera3D.position.x+=(control.smoothed.x*.035*control.pinch-camera3D.position.x)*.035;camera3D.position.y+=(control.smoothed.y*.025*control.pinch-camera3D.position.y)*.035;camera3D.lookAt(0,0,0);renderer.render(scene,camera3D)}
+    function animate(){requestAnimationFrame(animate);const delta=Math.min(clock.getDelta(),.033);elapsed+=delta;readHand();if(control.handCount<2&&control.desiredPinch>.34)wasPinching=true;else if(control.handCount<2&&wasPinching&&control.desiredPinch<.08){triggerReleaseBurst();wasPinching=false}control.pinch+=(control.desiredPinch-control.pinch)*.24;control.dualScale+=(control.desiredDualScale-control.dualScale)*.14;control.dualMotion+=(control.desiredDualMotion-control.dualMotion)*.3;control.desiredDualMotion*=.68;releaseEnergy*=.958;meterFill.style.width=`${Math.round((control.handCount>1?control.dualSpread:control.pinch)*100)}%`;updateParticles();material.uniforms.uTime.value=elapsed;particles.rotation.x=.34+Math.sin(elapsed*.14)*.08;particles.rotation.y=.14+Math.sin(elapsed*.11)*.17;camera3D.position.x+=(control.smoothed.x*.035*(control.handCount>1?1:control.pinch)-camera3D.position.x)*.035;camera3D.position.y+=(control.smoothed.y*.025*(control.handCount>1?1:control.pinch)-camera3D.position.y)*.035;camera3D.lookAt(0,0,0);renderer.render(scene,camera3D)}
     function pointerTarget(event){screenToWorld(event.clientX/innerWidth,event.clientY/innerHeight)}
     app.addEventListener("pointerdown",event=>{if(event.target.closest("button"))return;control.pointerActive=true;control.desiredPinch=1;pointerTarget(event);setStatus("牵引粒子","pinch");app.setPointerCapture?.(event.pointerId)});
     app.addEventListener("pointermove",event=>{if(control.pointerActive)pointerTarget(event)});
