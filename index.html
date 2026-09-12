@@ -102,14 +102,16 @@
     const gatherButton=document.querySelector("#gatherButton"),gatherPanel=document.querySelector("#gatherPanel"),gatherOptions=[...document.querySelectorAll(".gather-option")],diffusionButton=document.querySelector("#diffusionButton"),diffusionPanel=document.querySelector("#diffusionPanel"),diffusionOptions=[...document.querySelectorAll("[data-diffusion]")],shapeButton=document.querySelector("#shapeButton"),shapePanel=document.querySelector("#shapePanel"),shapeOptions=[...document.querySelectorAll(".shape-option")],paletteButton=document.querySelector("#paletteButton"),palettePanel=document.querySelector("#palettePanel"),swatches=[...document.querySelectorAll(".swatch")],mirrorButton=document.querySelector("#mirrorButton"), switchButton=document.querySelector("#switchButton"), cameraButton=document.querySelector("#cameraButton"), gestureMeter=document.querySelector("#gestureMeter"), meterLabel=document.querySelector("#meterLabel"), meterFill=document.querySelector("#meterFill");
 
     const compactDevice=matchMedia("(max-width: 600px)").matches||((navigator.deviceMemory||8)<=4);
-    const maxPixelRatio=compactDevice?1.65:2;
+    const maxPixelRatio=compactDevice?1.65:2,nativePixelRatio=Math.min(devicePixelRatio||1,maxPixelRatio);
     let renderer;
     try{renderer=new THREE.WebGLRenderer({canvas,antialias:false,powerPreference:"high-performance"})}catch(error){message.textContent="此设备需要支持 WebGL 2 才能显示粒子场";message.classList.add("error");startButton.disabled=true;throw error}
-    renderer.setPixelRatio(Math.min(devicePixelRatio||1,maxPixelRatio)); renderer.setSize(innerWidth,innerHeight,false); renderer.setClearColor(0x030405,1); renderer.outputColorSpace=THREE.SRGBColorSpace;
+    renderer.setPixelRatio(nativePixelRatio); renderer.setSize(innerWidth,innerHeight,false); renderer.setClearColor(0x030405,1); renderer.outputColorSpace=THREE.SRGBColorSpace;
     const scene=new THREE.Scene(); scene.fog=new THREE.FogExp2(0x030405,.009);
     const camera3D=new THREE.PerspectiveCamera(54,innerWidth/innerHeight,.1,180); camera3D.position.set(0,0,68);
 
     const particleCount=compactDevice?Math.min(4800,Math.max(2600,Math.round(innerWidth*innerHeight/185))):Math.min(7600,Math.max(3800,Math.round(innerWidth*innerHeight/150)));
+    const qualityLevels=compactDevice?[{pixel:1,particles:1},{pixel:.86,particles:.86},{pixel:.72,particles:.7}]:[{pixel:1,particles:1},{pixel:.9,particles:.9},{pixel:.78,particles:.76}];
+    let qualityTier=0,activeParticleCount=particleCount,activeGatherGuideCount=0,performanceFrames=0,performanceElapsed=0,lastDetectionAt=0;
     const positions=new Float32Array(particleCount*3), bases=new Float32Array(particleCount*3), velocities=new Float32Array(particleCount*3), colors=new Float32Array(particleCount*3), sizes=new Float32Array(particleCount), phases=new Float32Array(particleCount);
     const color=new THREE.Color();
     const palettes={violet:{start:.82,end:.67,saturation:.92,light:.58},aqua:{start:.5,end:.45,saturation:.88,light:.57},ember:{start:.04,end:.94,saturation:.9,light:.58},ice:{start:.56,end:.64,saturation:.82,light:.62}};
@@ -140,6 +142,12 @@
     gatherGuideGeometry.setAttribute("position",new THREE.BufferAttribute(gatherGuidePositions,3));
     const gatherGuideMaterial=new THREE.PointsMaterial({color:0xd78cff,size:compactDevice?.48:.42,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true});
     const gatherGuide=new THREE.Points(gatherGuideGeometry,gatherGuideMaterial);gatherGuide.visible=false;gatherGuide.renderOrder=2;scene.add(gatherGuide);
+    function applyQualityTier(tier,force=false){
+      tier=THREE.MathUtils.clamp(tier,0,qualityLevels.length-1);if(!force&&tier===qualityTier)return;qualityTier=tier;const quality=qualityLevels[tier];activeParticleCount=Math.max(1800,Math.floor(particleCount*quality.particles));activeGatherGuideCount=Math.max(160,Math.floor(gatherGuideCount*quality.particles));geometry.setDrawRange(0,activeParticleCount);gatherGuideGeometry.setDrawRange(0,activeGatherGuideCount);renderer.setPixelRatio(Math.max(1,Math.min(devicePixelRatio||1,maxPixelRatio*quality.pixel)));renderer.setSize(innerWidth,innerHeight,false);
+    }
+    function monitorPerformance(frameDelta){
+      if(document.hidden||frameDelta>.2)return;performanceFrames++;performanceElapsed+=frameDelta;if(performanceElapsed<2.5)return;const fps=performanceFrames/performanceElapsed;if(fps<43&&qualityTier<qualityLevels.length-1)applyQualityTier(qualityTier+1);else if(fps>56&&qualityTier>0)applyQualityTier(qualityTier-1);performanceFrames=0;performanceElapsed=0;
+    }
     const fingerSegments=[[0,1,.18,.16],[1,2,.16,.14],[2,3,.14,.11],[3,4,.11,.075],[5,6,.145,.12],[6,7,.12,.095],[7,8,.095,.06],[9,10,.15,.125],[10,11,.125,.1],[11,12,.1,.062],[13,14,.14,.115],[14,15,.115,.09],[15,16,.09,.058],[17,18,.12,.1],[18,19,.1,.078],[19,20,.078,.05]],palmTriangles=[[0,5,9],[0,9,13],[0,13,17]];
     const gestureKinds=new Uint8Array(particleCount),gestureParts=new Uint8Array(particleCount),gestureU=new Float32Array(particleCount),gestureV=new Float32Array(particleCount),gestureJitter=new Float32Array(particleCount);
     for(let i=0;i<particleCount;i++){const roll=Math.random();gestureKinds[i]=roll<.5?0:roll<.92?1:2;gestureParts[i]=gestureKinds[i]===0?Math.floor(Math.random()*fingerSegments.length):gestureKinds[i]===1?Math.floor(Math.random()*palmTriangles.length):Math.floor(Math.random()*21);gestureU[i]=Math.random();gestureV[i]=Math.random();gestureJitter[i]=THREE.MathUtils.clamp(gaussian(),-2.2,2.2)}
@@ -149,7 +157,7 @@
       if(smoothedGestureHands.length!==rawHands.length)smoothedGestureHands=rawHands.map(hand=>hand.map(point=>({x:point.x,y:point.y,z:point.z||0})));
       else rawHands.forEach((hand,handIndex)=>hand.forEach((point,pointIndex)=>{const smooth=smoothedGestureHands[handIndex][pointIndex];smooth.x=THREE.MathUtils.lerp(smooth.x,point.x,.46);smooth.y=THREE.MathUtils.lerp(smooth.y,point.y,.46);smooth.z=THREE.MathUtils.lerp(smooth.z,point.z||0,.38)}));
       const hands=smoothedGestureHands,worldHeight=2*Math.tan(THREE.MathUtils.degToRad(camera3D.fov/2))*camera3D.position.z,worldWidth=worldHeight*camera3D.aspect,target=shapeTargets.gesture;
-      for(let i=0;i<particleCount;i++){
+      for(let i=0;i<activeParticleCount;i++){
         const hand=hands[i%hands.length],palmScale=handScale(hand),kind=gestureKinds[i],part=gestureParts[i];let x,y,z;
         if(kind===0){const [ai,bi,startWidth,endWidth]=fingerSegments[part],a=hand[ai],b=hand[bi],t=gestureU[i],dx=b.x-a.x,dy=b.y-a.y,length=Math.hypot(dx,dy)||.001,side=gestureV[i]*2-1,width=THREE.MathUtils.lerp(startWidth,endWidth,t)*palmScale,thickness=side*width;x=THREE.MathUtils.lerp(a.x,b.x,t)-dy/length*thickness;y=THREE.MathUtils.lerp(a.y,b.y,t)+dx/length*thickness;z=THREE.MathUtils.lerp(a.z||0,b.z||0,t)+gestureJitter[i]*width*.34}
         else if(kind===1){const [ai,bi,ci]=palmTriangles[part],a=hand[ai],b=hand[bi],c=hand[ci],su=Math.sqrt(gestureU[i]),u=1-su,v=su*(1-gestureV[i]),w=su*gestureV[i];x=a.x*u+b.x*v+c.x*w;y=a.y*u+b.y*v+c.y*w;z=(a.z||0)*u+(b.z||0)*v+(c.z||0)*w+gestureJitter[i]*palmScale*.018}
@@ -202,15 +210,16 @@
         if(!navigator.mediaDevices?.getUserMedia)throw new Error("当前浏览器不支持摄像头访问");
         if(!handLandmarker)await createTracker(); stopMedia(); setStatus("等待摄像头授权"); message.textContent="请允许摄像头访问";
         mediaStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:facingMode},width:{ideal:compactDevice?960:1280},height:{ideal:720},frameRate:{ideal:30},focusMode:{ideal:"continuous"}}}); video.srcObject=mediaStream; await video.play();
-        launch.classList.add("hidden"); switchButton.disabled=false; cameraButton.disabled=false; gestureMeter.classList.add("visible"); setStatus("寻找手掌","live"); lastVideoTime=-1;
+        launch.classList.add("hidden"); switchButton.disabled=false; cameraButton.disabled=false; gestureMeter.classList.add("visible"); setStatus("寻找手掌","live"); lastVideoTime=-1;lastDetectionAt=0;
       }catch(error){startButton.disabled=false;startButton.textContent="重新尝试";message.classList.add("error");message.textContent=error?.name==="NotAllowedError"?"摄像头权限被拒绝，请在地址栏中改为允许":(error?.message||"无法开启摄像头");setStatus("摄像头未开启","error");launch.classList.remove("hidden")}
     }
-    function stopMedia(){if(mediaStream)mediaStream.getTracks().forEach(track=>track.stop());mediaStream=null;video.srcObject=null;control.handVisible=false;control.handCount=0;control.desiredPinch=0;control.desiredDualScale=1;control.desiredDualMotion=0;gestureHasPose=false;smoothedGestureHands=[];trackedHands=[];lastHandSeparation=null}
+    function stopMedia(){if(mediaStream)mediaStream.getTracks().forEach(track=>track.stop());mediaStream=null;video.srcObject=null;control.handVisible=false;control.handCount=0;control.desiredPinch=0;control.desiredDualScale=1;control.desiredDualMotion=0;gestureHasPose=false;smoothedGestureHands=[];trackedHands=[];lastHandSeparation=null;lastVideoTime=-1;lastDetectionAt=0}
     function stopCamera(){stopMedia();switchButton.disabled=true;cameraButton.disabled=true;gestureMeter.classList.remove("visible");startButton.disabled=false;startButton.textContent="再次开启";message.classList.remove("error");message.textContent=activeShape==="gesture"?"开启摄像头，粒子将继续镜像模仿你的手势":"粒子继续自由漂移";launch.classList.remove("hidden");setStatus(activeShape==="gesture"?"等待手势":"自由漂移")}
     async function switchCamera(){facingMode=facingMode==="user"?"environment":"user";mirrorControl=facingMode==="user";switchButton.disabled=true;await startCamera()}
     function readHand(){
-      if(!mediaStream||!handLandmarker||video.readyState<2||video.currentTime===lastVideoTime)return; lastVideoTime=video.currentTime;
-      const now=performance.now(),result=handLandmarker.detectForVideo(video,now),hands=stabilizeHands(result.landmarks||[],now),hand=hands[0];
+      const now=performance.now(),detectionInterval=qualityTier===2?50:(compactDevice?41:33);
+      if(!mediaStream||!handLandmarker||video.readyState<2||video.currentTime===lastVideoTime||now-lastDetectionAt<detectionInterval)return;lastDetectionAt=now;lastVideoTime=video.currentTime;
+      const result=handLandmarker.detectForVideo(video,now),hands=stabilizeHands(result.landmarks||[],now),hand=hands[0];
       control.handCount=hands.length;control.handVisible=hands.length>0;
       if(!hand){control.desiredPinch=control.pointerActive?1:0;control.desiredDualScale=1;control.desiredDualMotion=0;gestureHasPose=false;smoothedGestureHands=[];lastHandSeparation=null;meterLabel.textContent=activeShape==="gesture"?"手势映射":"单手捏合";setStatus("寻找手掌","live");return}
       if(activeShape==="gesture"){updateGestureTargets(hands);control.desiredPinch=0;control.desiredDualScale=1;control.desiredDualMotion=0;lastHandSeparation=null;wasPinching=false;meterLabel.textContent=hands.length>1?"双手映射":"手势映射";setStatus(hands.length>1?"正在模仿双手":"正在模仿手势","pinch");return}
@@ -227,7 +236,7 @@
     }
     function triggerReleaseBurst(){
       const pos=geometry.attributes.position.array;
-      for(let i=0;i<particleCount;i++){
+      for(let i=0;i<activeParticleCount;i++){
         const i3=i*3,dx=pos[i3]-control.smoothed.x,dy=pos[i3+1]-control.smoothed.y,planar=Math.hypot(dx,dy)+.001,rx=dx/planar,ry=dy/planar,tx=-ry,ty=rx,proximity=Math.exp(-planar*.045),kick=(.2+Math.random()*.45)*(.55+proximity);
         if(diffusionMode==="vortex"){velocities[i3]+=rx*kick*.14+tx*kick*2.15;velocities[i3+1]+=ry*kick*.14+ty*kick*2.15;velocities[i3+2]+=(.1+Math.random()*.3)*(.5+proximity*.5)}
         else if(diffusionMode==="fountain"){velocities[i3]+=rx*kick*.34;velocities[i3+1]+=ry*kick*.2+.25+Math.random()*.24;velocities[i3+2]+=(1.05+Math.random()*1.25)*(.65+proximity*.65)}
@@ -240,7 +249,7 @@
     function updateGatherGuide(level){
       const visible=activeShape!=="gesture"&&level>.035;gatherGuide.visible=visible;if(!visible)return;
       gatherGuideMaterial.opacity=Math.min(1,.52+level*.62);gatherGuideMaterial.size=(compactDevice?.48:.42)*(gatherMode==="magnet"?1.42:(gatherMode==="orbit"?1.18:1));
-      const cx=control.smoothed.x,cy=control.smoothed.y,cz=control.smoothed.z,count=gatherGuideCount;
+      const cx=control.smoothed.x,cy=control.smoothed.y,cz=control.smoothed.z,count=activeGatherGuideCount;
       for(let i=0;i<count;i++){
         const i3=i*3,seed=gatherGuideSeeds[i];let x,y,z;
         if(gatherMode==="pulse"){const group=i%3,u=Math.floor(i/3)/(count/3),angle=u*Math.PI*2+seed*.025,phase=(elapsed*1.55+group/3)%1,radius=2.2+(1-phase)*17;x=Math.cos(angle)*radius;y=Math.sin(angle)*radius;z=(seed-.5)*1.2}
@@ -253,7 +262,7 @@
     }
     function updateParticles(){
       const pos=geometry.attributes.position.array,gestureMode=activeShape==="gesture",active=gestureMode?0:control.pinch,dualScale=gestureMode?1:control.dualScale,dualExpand=gestureMode?0:Math.max(0,control.dualMotion),dualGather=gestureMode?0:Math.max(0,-control.dualMotion),dualCloseness=gestureMode||control.handCount<2?0:Math.max(0,1-control.dualSpread),gatherStrength=Math.max(active,dualGather,dualCloseness*.72),baseRotation=gestureMode?0:elapsed*.035,cosR=Math.cos(baseRotation),sinR=Math.sin(baseRotation);control.smoothed.lerp(control.target,.26);
-      for(let i=0;i<particleCount;i++){
+      for(let i=0;i<activeParticleCount;i++){
         const i3=i*3;let px=pos[i3],py=pos[i3+1],pz=pos[i3+2],vx=velocities[i3],vy=velocities[i3+1],vz=velocities[i3+2];
         const bx=(bases[i3]*cosR-bases[i3+1]*sinR)*dualScale,by=(bases[i3]*sinR+bases[i3+1]*cosR)*dualScale,bz=gestureMode?bases[i3+2]:bases[i3+2]*(.72+dualScale*.35)+Math.sin(elapsed*.6+phases[i])*.3,spring=gestureMode?(gestureHasPose?.072:.003):(.00048+(1-active)*.00135)*(1-releaseEnergy*.9)*(control.handCount>1?1.7:1);
         vx+=(bx-px)*spring;vy+=(by-py)*spring;vz+=(bz-pz)*spring;
@@ -267,7 +276,7 @@
       }
       geometry.attributes.position.needsUpdate=true;
     }
-    function animate(){requestAnimationFrame(animate);const delta=Math.min(clock.getDelta(),.033),gestureMode=activeShape==="gesture";elapsed+=delta;readHand();if(!gestureMode&&control.handCount<2&&control.desiredPinch>.34)wasPinching=true;else if(!gestureMode&&control.handCount<2&&wasPinching&&control.desiredPinch<.08){triggerReleaseBurst();wasPinching=false}control.pinch+=(control.desiredPinch-control.pinch)*.24;control.dualScale+=(control.desiredDualScale-control.dualScale)*.14;control.dualMotion+=(control.desiredDualMotion-control.dualMotion)*.3;control.desiredDualMotion*=.68;if(releaseEnergy>.01)releaseAge+=delta;releaseEnergy*=gestureMode?.86:.972;if(!gestureMode&&diffusionMode==="vortex"&&control.dualMotion>.04)diffusionSpin+=control.dualMotion*.0018;diffusionSpin*=gestureMode?.8:.965;meterFill.style.width=`${gestureMode?(gestureHasPose?100:0):Math.round((control.handCount>1?control.dualSpread:control.pinch)*100)}%`;updateParticles();const gatherVisual=gestureMode?0:Math.max(control.pinch,control.handCount>1?Math.max(0,1-control.dualSpread)*.85:0);updateGatherGuide(gatherVisual);material.uniforms.uTime.value=elapsed;material.uniforms.uGesture.value+=(Number(gestureMode)-material.uniforms.uGesture.value)*.14;material.uniforms.uGather.value+=(gatherVisual-material.uniforms.uGather.value)*.2;const targetRotationX=gestureMode?0:.34+Math.sin(elapsed*.14)*.08,targetRotationY=gestureMode?0:.14+Math.sin(elapsed*.11)*.17,targetRotationZ=gestureMode?0:-.04;particles.rotation.x+=(targetRotationX-particles.rotation.x)*.12;particles.rotation.y+=(targetRotationY-particles.rotation.y)*.12;particles.rotation.z+=(targetRotationZ-particles.rotation.z)*.12;particles.rotation.z+=diffusionSpin;const cameraTargetX=gestureMode?0:control.smoothed.x*.035*(control.handCount>1?1:control.pinch),cameraTargetY=gestureMode?0:control.smoothed.y*.025*(control.handCount>1?1:control.pinch);camera3D.position.x+=(cameraTargetX-camera3D.position.x)*.035;camera3D.position.y+=(cameraTargetY-camera3D.position.y)*.035;camera3D.lookAt(0,0,0);renderer.render(scene,camera3D)}
+    function animate(){requestAnimationFrame(animate);const rawDelta=clock.getDelta(),delta=Math.min(rawDelta,.033),gestureMode=activeShape==="gesture";monitorPerformance(rawDelta);elapsed+=delta;readHand();if(!gestureMode&&control.handCount<2&&control.desiredPinch>.34)wasPinching=true;else if(!gestureMode&&control.handCount<2&&wasPinching&&control.desiredPinch<.08){triggerReleaseBurst();wasPinching=false}control.pinch+=(control.desiredPinch-control.pinch)*.24;control.dualScale+=(control.desiredDualScale-control.dualScale)*.14;control.dualMotion+=(control.desiredDualMotion-control.dualMotion)*.3;control.desiredDualMotion*=.68;if(releaseEnergy>.01)releaseAge+=delta;releaseEnergy*=gestureMode?.86:.972;if(!gestureMode&&diffusionMode==="vortex"&&control.dualMotion>.04)diffusionSpin+=control.dualMotion*.0018;diffusionSpin*=gestureMode?.8:.965;meterFill.style.width=`${gestureMode?(gestureHasPose?100:0):Math.round((control.handCount>1?control.dualSpread:control.pinch)*100)}%`;updateParticles();const gatherVisual=gestureMode?0:Math.max(control.pinch,control.handCount>1?Math.max(0,1-control.dualSpread)*.85:0);updateGatherGuide(gatherVisual);material.uniforms.uTime.value=elapsed;material.uniforms.uGesture.value+=(Number(gestureMode)-material.uniforms.uGesture.value)*.14;material.uniforms.uGather.value+=(gatherVisual-material.uniforms.uGather.value)*.2;const targetRotationX=gestureMode?0:.34+Math.sin(elapsed*.14)*.08,targetRotationY=gestureMode?0:.14+Math.sin(elapsed*.11)*.17,targetRotationZ=gestureMode?0:-.04;particles.rotation.x+=(targetRotationX-particles.rotation.x)*.12;particles.rotation.y+=(targetRotationY-particles.rotation.y)*.12;particles.rotation.z+=(targetRotationZ-particles.rotation.z)*.12;particles.rotation.z+=diffusionSpin;const cameraTargetX=gestureMode?0:control.smoothed.x*.035*(control.handCount>1?1:control.pinch),cameraTargetY=gestureMode?0:control.smoothed.y*.025*(control.handCount>1?1:control.pinch);camera3D.position.x+=(cameraTargetX-camera3D.position.x)*.035;camera3D.position.y+=(cameraTargetY-camera3D.position.y)*.035;camera3D.lookAt(0,0,0);renderer.render(scene,camera3D)}
     function pointerTarget(event){screenToWorld(event.clientX/innerWidth,event.clientY/innerHeight)}
     const panelPairs=[[gatherButton,gatherPanel],[diffusionButton,diffusionPanel],[shapeButton,shapePanel],[paletteButton,palettePanel]];
     function closePanels(except=null){panelPairs.forEach(([button,panel])=>{if(panel===except)return;panel.classList.remove("open");button.setAttribute("aria-expanded","false")})}
@@ -285,9 +294,10 @@
     app.addEventListener("pointermove",event=>{if(control.pointerActive)pointerTarget(event)});
     app.addEventListener("pointerup",()=>{control.pointerActive=false;control.desiredPinch=control.handVisible?control.desiredPinch:0;if(!control.handVisible)setStatus(mediaStream?"寻找手掌":"自由漂移",mediaStream?"live":"")});
     app.addEventListener("pointercancel",()=>{control.pointerActive=false;if(!control.handVisible)control.desiredPinch=0});
-    window.addEventListener("resize",()=>{camera3D.aspect=innerWidth/innerHeight;camera3D.updateProjectionMatrix();renderer.setPixelRatio(Math.min(devicePixelRatio||1,maxPixelRatio));renderer.setSize(innerWidth,innerHeight,false)});
+    window.addEventListener("resize",()=>{camera3D.aspect=innerWidth/innerHeight;camera3D.updateProjectionMatrix();performanceFrames=0;performanceElapsed=0;applyQualityTier(qualityTier,true)});
+    document.addEventListener("visibilitychange",()=>{performanceFrames=0;performanceElapsed=0;clock.getDelta()});
     startButton.addEventListener("click",startCamera);cameraButton.addEventListener("click",stopCamera);switchButton.addEventListener("click",switchCamera);mirrorButton.addEventListener("click",()=>{if(activeShape==="gesture"){gestureMirror=!gestureMirror;smoothedGestureHands=[];mirrorButton.setAttribute("aria-label",gestureMirror?"关闭手势镜像":"开启手势镜像");setStatus(gestureMirror?"镜像手势":"正常方向","live")}else mirrorControl=!mirrorControl});window.addEventListener("beforeunload",stopMedia);
-    screenToWorld(.5,.5);control.smoothed.copy(control.target);animate();
+    applyQualityTier(0,true);screenToWorld(.5,.5);control.smoothed.copy(control.target);animate();
     if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1")){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").then(()=>navigator.serviceWorker.ready).then(()=>{document.documentElement.dataset.offline="ready"}).catch(()=>{document.documentElement.dataset.offline="unavailable"}))}
   </script>
 </body>

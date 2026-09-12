@@ -17,7 +17,7 @@ https://zmjjkk-0925.github.io/starflow-gesture/
 - Strongly differentiated gather effects with mode-specific motion and glow: magnetic core, contraction pulse, spiral pull, and orbital ring
 - Mirrored live gesture mapping with smoothed landmarks and filled, tapered one- or two-hand silhouettes
 - Strongly differentiated diffusion modes: radial starburst, rotating vortex, forward depth fountain, and travelling ripple shockwave
-- Responsive performance settings for phones and computers
+- Adaptive render resolution, particle budgeting, and hand-tracking cadence for smoother phones and computers
 - Installable PWA with offline asset caching
 - Pointer and touch fallback when camera access is unavailable
 
