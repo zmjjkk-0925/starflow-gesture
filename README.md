@@ -13,6 +13,7 @@ https://zmjjkk-0925.github.io/starflow-gesture/
 - One-hand pinch attraction and three-dimensional release burst
 - Two-hand gather and expansion control based on palm distance
 - Switchable particle palettes: violet, aurora aqua, ember, and glacier blue
+- Switchable gather forms: nebula, sphere, ring, heart, and spiral
 - Responsive performance settings for phones and computers
 - Installable PWA with offline asset caching
 - Pointer and touch fallback when camera access is unavailable
