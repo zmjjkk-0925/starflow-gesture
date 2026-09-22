@@ -15,7 +15,7 @@ https://zmjjkk-0925.github.io/starflow-gesture/
 - Switchable particle palettes: violet, aurora aqua, ember, and glacier blue
 - Switchable gather forms: nebula, sphere, ring, heart, and spiral
 - Strongly differentiated gather effects with mode-specific motion and glow: magnetic core, contraction pulse, spiral pull, and orbital ring
-- Mirrored live gesture mapping with filled fingers, palm, joints, and wrist for realistic one- or two-hand silhouettes
+- Mirrored live gesture mapping with filled fingers, joints, thumb web, and a complete wrist-free palm silhouette
 - Strongly differentiated diffusion modes: radial starburst, rotating vortex, forward depth fountain, and travelling ripple shockwave
 - Adaptive render resolution, particle budgeting, and hand-tracking cadence for smoother phones and computers
 - Installable PWA with offline asset caching
